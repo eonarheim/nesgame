@@ -1,0 +1,8 @@
+sample/
+tools/fceuxd.10a/
+tools/fceux-2.2.2-win32/
+tools/NESASM3/
+
+*.nes
+*.fns
+*.zip
