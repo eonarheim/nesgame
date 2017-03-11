@@ -97,11 +97,27 @@ InitialzeState:
   STA $03
 
 
+;  PPUCTRL ($2000)
+;  76543210
+;  | ||||||
+;  | ||||++- Base nametable address
+;  | ||||    (0 = $2000; 1 = $2400; 2 = $2800; 3 = $2C00)
+;  | |||+--- VRAM address increment per CPU read/write of PPUDATA
+;  | |||     (0: increment by 1, going across; 1: increment by 32, going down)
+;  | ||+---- Sprite pattern table address for 8x8 sprites (0: $0000; 1: $1000)
+;  | |+----- Background pattern table address (0: $0000; 1: $1000)
+;  | +------ Sprite size (0: 8x8; 1: 8x16)
+;  |
+;  +-------- Generate an NMI at the start of the
+;            vertical blanking interval vblank (0: off; 1: on)
   LDA #%10000000   ; enable NMI, sprites from Pattern Table 0
   STA $2000
 
+
   LDA #%00010000   ; enable sprites
   STA $2001
+
+
 
 Forever:
   JMP Forever     ;jump back to forever MAINLOOP will interrupt for game logic, infinite loop to keep the rom from exiting
@@ -165,7 +181,7 @@ DrawPlayerLoop:
   INX
   INX
   INX 
-  CPX #$10              ; Compare X to hex $10, decimal 16 meaning all 4 Player sprites done
+  CPX #$1C              ; Compare X to hex $1C, decimal 28 meaning all 7 Player sprites done
   BNE DrawPlayerLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
                         ; if compare was equal to 32, keep going down
   RTS
@@ -267,15 +283,32 @@ ReadBDone:        ; handling this button is done
   .bank 1
   .org $E000
 palette:
-  .db $0F,$31,$32,$33,$0F,$35,$36,$37,$0F,$39,$3A,$3B,$0F,$3D,$3E,$0F
-  .db $0F,$1C,$15,$14,$0F,$02,$38,$3C,$0F,$1C,$15,$14,$0F,$02,$38,$3C
+  ;; Background Palletes
+  .db $0F,$1C,$15,$14, $0F,$02,$38,$3C, $0F,$1C,$15,$14, $0F,$02,$38,$3C
+  ;;  Character Palletes
+  .db $0F,$2C,$11,$15, $0F,$35,$36,$37, $0F,$39,$3A,$3B, $0F,$3D,$3E,$0F
 
 sprites:
+; 1st byte encodes the y position
+; 2nd byte encodes the tile index loaded into the PPU 
+; 3rd byte encodes any sprite attributes
+;  76543210
+;  |||   ||
+;  |||   ++- Color Palette of sprite.  Choose which set of 4 from the 16 colors to use
+;  |||
+;  ||+------ Priority (0: in front of background; 1: behind background)
+;  |+------- Flip sprite horizontally
+;  +-------- Flip sprite vertically
+; 4th byte encodes the x position
+
      ;vert tile attr horiz
   .db $80, $00, $00, $80   ;sprite 0
   .db $80, $01, $00, $88   ;sprite 1
+  .db $80, $02, $00, $90   ;sprite 1
   .db $88, $10, $00, $80   ;sprite 2
   .db $88, $11, $00, $88   ;sprite 3
+  .db $88, $12, $00, $90   ;sprite 3
+  .db $90, $21, $00, $88   ;sprite 3
 
 
 ;;;;;;;;;;;;;;  
@@ -303,4 +336,4 @@ nescallback:
   
   .bank 2
   .org $0000
-  .incbin "player.chr"   ;includes 8KB graphics file from SMB1
+  .incbin "art.chr"   ;includes 8KB graphics file from SMB1
