@@ -19,6 +19,42 @@
   .inesmir 1   ; background mirroring
   
 
+
+;; DECLARE SOME VARIABLES HERE
+  .rsset $0000  ;;start variables at ram location 0 in zero page memory
+playerinitx   .rs 1 ;
+playerinity   .rs 1 ;
+playerx       .rs 1 ; players x offset
+playery       .rs 1 ; players y offset
+controller1   .rs 1 ; controller 1 button vector
+
+backgroundLo  .rs 1
+backgroundHi  .rs 1
+counterLo     .rs 1
+counterHi     .rs 1
+
+
+
+scroll     .rs 1  ; horizontal scroll count
+nametable  .rs 1  ; which nametable to use, 0 or 1
+columnLow  .rs 1  ; low byte of new column address
+columnHigh .rs 1  ; high byte of new column address
+sourceLow  .rs 1  ; source for column data
+sourceHigh .rs 1
+columnNumber .rs 1  ; which column of level data to draw
+
+
+;;;;;;;;;;;;;;;;;;;;
+; Initialze some game state variables
+InitialzeState:
+  LDA #$00   ; player x offset
+  STA playerx    
+  LDA #$00   ; player y offset
+  STA playery
+  LDA #$00   ; controller state
+  STA controller1
+
+
 ;;;;;;;;;;;;;;;
 ; NES is powererd on
 ;    
@@ -61,40 +97,109 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
 ;;;;;;;;;;;;;;;;;;;;;;
 ; Load game pallets
 LoadPalettes:
-  LDA $2002    ; read PPU status to reset the high/low latch
-  LDA #$3F     ; max out 0011 1111
-  STA $2006    ; write the high byte of $3F00 address
+  LDA $2002             ; read PPU status to reset the high/low latch
+  LDA #$3F              ; max out 0011 1111
+  STA $2006             ; write the high byte of $3F00 address
   LDA #$00
-  STA $2006    ; write the low byte of $3F00 address
-  LDX #$00
+  STA $2006             ; write the low byte of $3F00 address
+  LDX #$00              ; start out at 0
 LoadPalettesLoop:
-  LDA palette, x        ;load palette byte
-  STA $2007             ;write pallete byte to PPU
-  INX                   ;set index to next byte
-  CPX #$20              ; check if x = $20 in hex, 32 in dec
-  BNE LoadPalettesLoop  ;if x = $20, 32 bytes copied, all done
+  LDA palette, x        ; load data from address (palette + the value in x)
+                          ; 1st time through loop it will load palette+0
+                          ; 2nd time through loop it will load palette+1
+                          ; 3rd time through loop it will load palette+2
+                          ; etc
+  STA $2007             ; write to PPU
+  INX                   ; X = X + 1
+  CPX #$20              ; Compare X to hex $10, decimal 16 - copying 16 bytes = 4 sprites
+  BNE LoadPalettesLoop  ; Branch to LoadPalettesLoop if compare was Not Equal to zero
 
 
 LoadSprites:
   LDX #$00              ; start at 0
 LoadSpritesLoop:
-  LDA sprites, x        ; load data from address (sprites +  x)
+  LDA playersprite, x        ; load data from address (sprites +  x)
   STA $0200, x          ; store into RAM address ($0200 + x)
   INX                   ; X = X + 1
-  CPX #$20              ; Compare X to hex $20, decimal 32
+  CPX #$1C              ; Compare X to hex $20, decimal 32
   BNE LoadSpritesLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
                         ; if compare was equal to 32, keep going down
 
+
+;; Background is 960 bytes 240 * 4
+LoadBackground:
+  LDA $2002             ; read PPU status to reset the high/low latch
+  LDA #$20
+  STA $2006             ; write the high byte of $2000 address
+  LDA #$00
+  STA $2006             ; write the low byte of $2000 address
+  LDX #$00              ; start out at 0
+
+  ;; we need to copy more that 256
+  LDA #LOW(background)
+  STA backgroundLo
+  LDA #HIGH(background)
+  STA backgroundHi
+  ;; 960 bytes = $03C0
+  LDA #$C0;
+  STA counterLo
+  LDA #$03
+  STA counterHi
+
+  LDY #$00
+LoadBackgroundLoop:
+  LDA [backgroundLo], y ; load data from background
+  STA $2007             ; write to PPU port
+  LDA backgroundLo
+  CLC
+  ADC #$01
+  STA backgroundLo
+  LDA backgroundHi
+  ADC #$00
+  STA backgroundHi  ; inc poitner to the next byte
+
+  LDA counterLo
+  SEC
+  SBC #$01
+  STA counterLo
+  LDA counterHi
+  SBC #$00
+  STA counterHi       ; decrement the loop counter
+
+  LDA counterLo
+  CMP #$00
+  BNE LoadBackgroundLoop
+  LDA counterHi
+  CMP #$00
+  BNE LoadBackgroundLoop  ; if the loop counter isn't 0000, keep copying
+
+  
+
+  ;LDA background, x     ; load data from address (background + the value in x)
+  ;STA $2007             ; write to PPU
+  ;INX                   ; X = X + 1
+  ;CPX #$80              ; Compare X to hex $80, decimal 128 - copying 128 bytes
+  ;BNE LoadBackgroundLoop  ; Branch to LoadBackgroundLoop if compare was Not Equal to zero
+                        ; if compare was equal to 128, keep going down
+
+LoadAttribute:
+  LDA $2002             ; read PPU status to reset the high/low latch
+  LDA #$23
+  STA $2006             ; write the high byte of $23C0 address
+  LDA #$C0
+  STA $2006             ; write the low byte of $23C0 address
+  LDX #$00              ; start out at 0
+LoadAttributeLoop:
+  LDA attribute, x      ; load data from address (attribute + the value in x)
+  STA $2007             ; write to PPU
+  INX                   ; X = X + 1
+  CPX #$08              ; Compare X to hex $08, decimal 8 - copying 8 bytes
+  BNE LoadAttributeLoop  ; Branch to LoadAttributeLoop if compare was Not Equal to zero
+                        ; if compare was equal to 128, keep going down
+
+
                        
-;;;;;;;;;;;;;;;;;;;;
-; Initialze some game state variables
-InitialzeState:
-  LDA #$00   ; player x offset
-  STA $00    
-  LDA #$00   ; player y offset
-  STA $01
-  LDA #$00   ; controller state
-  STA $03
+
 
 
 ;  PPUCTRL ($2000)
@@ -110,11 +215,17 @@ InitialzeState:
 ;  |
 ;  +-------- Generate an NMI at the start of the
 ;            vertical blanking interval vblank (0: off; 1: on)
-  LDA #%10000000   ; enable NMI, sprites from Pattern Table 0
+  ;LDA #%10000000   ; enable NMI, sprites from Pattern Table 0
+  ;STA $2000
+
+
+  ;LDA #%00010000   ; enable sprites
+  ;STA $2001
+              
+  LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
   STA $2000
 
-
-  LDA #%00010000   ; enable sprites
+  LDA #%00011110   ; enable sprites, enable background, no clipping on left side
   STA $2001
 
 
@@ -131,19 +242,10 @@ MAINLOOP: ; non-maskable interrupt (draw screen)
   STA $4014  ; set the high byte (02) of the RAM address, start the transfer
 
   ;; Draw game
-  JSR Draw
-
-  ;;This is the PPU clean up section, so rendering the next frame starts properly.
-  ;LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
-  ;STA $2000
-  ;LDA #%00011110   ; enable sprites, enable background, no clipping on left side
-  ;STA $2001
-  ;LDA #$00        ;;tell the ppu there is no background scrolling
-  ;STA $2005
-  ;STA $2005  
-
+  JSR Draw 
+  
   ;; Update game
-  JSR Update
+  JSR Update 
 
   RTI        ; return from interrupt
 
@@ -153,11 +255,15 @@ MAINLOOP: ; non-maskable interrupt (draw screen)
 Draw:
   
   JSR DrawPlayer
-  LDA #%10000000   ; enable NMI, sprites from Pattern Table 0
-  STA $2000
 
-  LDA #%00010000   ; enable sprites
+  ;;This is the PPU clean up section, so rendering the next frame starts properly.
+  LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
+  STA $2000
+  LDA #%00011110   ; enable sprites, enable background, no clipping on left side
   STA $2001
+  LDA #$00        ;;tell the ppu there is no background scrolling
+  STA $2005
+  STA $2005
 
   RTS
 
@@ -170,12 +276,12 @@ DrawPlayerLoop:
   
   LDA $0203, x          ; load current x sprite position
   CLC
-  ADC $00               ; add player x offset
+  ADC playerx               ; add player x offset
   STA $0203, x          ; store into RAM address ($0200 + x)
 
   LDA $0200, x          ; load current y sprite position
   CLC
-  ADC $01               ; add player y offset
+  ADC playery               ; add player y offset
   STA $0200, x          ; stor into R
   INX                   ; X = X + 4 loop to the next sprite
   INX
@@ -188,8 +294,8 @@ DrawPlayerLoop:
 
 
 Update:
-    LDA #$00 ;; clear controller vector
-    STA $00
+    LDA #$00 ;; clear player x offset
+    STA playerx
     JSR LatchController
     JSR PollController
     JSR ReadA
@@ -224,7 +330,7 @@ PollController:
 PollControllerLoop:
   LDA $4016  ; player 1 - A 
   LSR A      ; shift right
-  ROL $03    ; right shift button vector in mem location $0003
+  ROL controller1    ; right shift button vector in mem location $0003
   INX
   CPX #$08
   BNE PollControllerLoop
@@ -232,37 +338,37 @@ PollControllerLoop:
 
 
 HandleRightButton:
-  LDA $03         ; load button vector into ADC
+  LDA controller1         ; load button vector into ADC
   AND #%00000001  ; check right button
   BNE RightButtonDone ; no input skip to end
-  LDA $00         ; load sprite X position
+  LDA playerx         ; load sprite X position
   CLC             ; make sure the carry flag is clear
   ADC #$01        ; A = A + 1
-  STA $00         ; save sprite X position
+  STA playerx         ; save sprite X position
 RightButtonDone:
   RTS
 
 
 UpdatePositions:
   JSR HandleRightButton  
-  LDA $00         ; load sprite X position
+  LDA playerx         ; load sprite X position
   RTS
 
 ReadA: 
-  LDA $03       ; player 1 - A
+  LDA controller1  ; controller1 1 - A button
   AND #%10000000  ; only look at bit 0
   BEQ ReadADone   ; branch to ReadADone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
   LDA $0203       ; load sprite X position
   CLC             ; make sure the carry flag is clear
   LDA #$01        ; A = A + 1
-  STA $00       ; save sprite X position
+  STA playerx       ; save sprite X position
 ReadADone:        ; handling this button is done
   RTS
   
 
 ReadB: 
-  LDA $03       ; player 1 - B
+  LDA controller1       ; controller1 1 - B button
   AND #%01000000  ; only look at bit 0
   BEQ ReadBDone   ; branch to ReadBDone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
@@ -270,7 +376,7 @@ ReadB:
   ;SEC             ; make sure carry flag is set
   ;SBC #$01        ; A = A - 1
   LDA #$FF        ; -1 in 2's compliment
-  STA $00       ; save sprite X position
+  STA playerx       ; save sprite X position
 ReadBDone:        ; handling this button is done
   RTS
 
@@ -283,12 +389,12 @@ ReadBDone:        ; handling this button is done
   .bank 1
   .org $E000
 palette:
-  ;; Background Palletes
-  .db $0F,$1C,$15,$14, $0F,$02,$38,$3C, $0F,$1C,$15,$14, $0F,$02,$38,$3C
-  ;;  Character Palletes
-  .db $0F,$2C,$11,$15, $0F,$35,$36,$37, $0F,$39,$3A,$3B, $0F,$3D,$3E,$0F
+  ;; Background Palletes (0-3)
+  .db $21,$1A,$38,$18, $0F,$02,$38,$3C, $0F,$1C,$15,$14, $3F,$02,$38,$3C
+  ;;  Character Palletes (0-3)
+  .db $21,$2C,$11,$15, $0F,$35,$36,$37, $0F,$39,$3A,$3B, $0F,$3D,$3E,$0F
 
-sprites:
+playersprite:
 ; 1st byte encodes the y position
 ; 2nd byte encodes the tile index loaded into the PPU 
 ; 3rd byte encodes any sprite attributes
@@ -304,11 +410,151 @@ sprites:
      ;vert tile attr horiz
   .db $80, $00, $00, $80   ;sprite 0
   .db $80, $01, $00, $88   ;sprite 1
-  .db $80, $02, $00, $90   ;sprite 1
-  .db $88, $10, $00, $80   ;sprite 2
-  .db $88, $11, $00, $88   ;sprite 3
-  .db $88, $12, $00, $90   ;sprite 3
-  .db $90, $21, $00, $88   ;sprite 3
+  .db $80, $02, $00, $90   ;sprite 2
+  .db $88, $10, $00, $80   ;sprite 3
+  .db $88, $11, $00, $88   ;sprite 4
+  .db $88, $12, $00, $90   ;sprite 5
+  .db $90, $21, $00, $88   ;sprite 6
+
+
+background:
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+
+  .db $00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01
+  .db $00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01  ;;ground
+
+  .db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+  .db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10  ;; dirt
+
+  .db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+  .db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10  ;; dirt
+  
+  .db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+  .db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10  ;; dirt
+
+attribute:
+
+  .db $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
+
+  .db %00111111, %00111111, %00111111, %00111111, %00111111, %00111111, %00111111, %00111111
+  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+
+  .db $FF,$24,$24,$24, $47,$47,$24,$24 ,$47,$47,$47,$47, $47,$47,$24,$24 ,$24,$24,$24,$24 ,$24,$24,$24,$24, $24,$24,$24,$24, $55,$56,$24,$24  ;;brick bottoms
+
+
+; Load in level columns
+; The first 32 bytes is the first column and so on, each byte is sprite index
+;columnData:
+  ;.incbin "level.bin"
+
+; Load column sprite attributes
+; TODO how is this defined?
+;attribData:
+  ;.incbin "attr.bin"
 
 
 ;;;;;;;;;;;;;;  
@@ -336,4 +582,4 @@ nescallback:
   
   .bank 2
   .org $0000
-  .incbin "art.chr"   ;includes 8KB graphics file from SMB1
+  .incbin "art.chr"   ;includes 8KB graphics file
