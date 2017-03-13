@@ -22,17 +22,20 @@
 
 ;; DECLARE SOME VARIABLES HERE
   .rsset $0000  ;;start variables at ram location 0 in zero page memory
-playerinitx   .rs 1 ;
-playerinity   .rs 1 ;
-playerx       .rs 1 ; players x offset
-playery       .rs 1 ; players y offset
+playerx       .rs 1 ; players x pos
+playervx      .rs 1 ; players x vel
+playery       .rs 1 ; players y pos
+playervy      .rs 1 ; player  y vel (negative is up)
 controller1   .rs 1 ; controller 1 button vector
+
+gravity       .rs 1 ; gravity
+
+ground        .rs 1 ; y value of the ground
 
 backgroundLo  .rs 1
 backgroundHi  .rs 1
 counterLo     .rs 1
 counterHi     .rs 1
-
 
 
 scroll     .rs 1  ; horizontal scroll count
@@ -42,17 +45,6 @@ columnHigh .rs 1  ; high byte of new column address
 sourceLow  .rs 1  ; source for column data
 sourceHigh .rs 1
 columnNumber .rs 1  ; which column of level data to draw
-
-
-;;;;;;;;;;;;;;;;;;;;
-; Initialze some game state variables
-InitialzeState:
-  LDA #$00   ; player x offset
-  STA playerx    
-  LDA #$00   ; player y offset
-  STA playery
-  LDA #$00   ; controller state
-  STA controller1
 
 
 ;;;;;;;;;;;;;;;
@@ -76,6 +68,7 @@ vblankwait1:       ; First wait for vblank to make sure PPU is ready
   BIT $2002
   BPL vblankwait1
 
+;; Helper to wipe memory
 clrmem:
   LDA #$00
   STA $0000, x
@@ -146,34 +139,33 @@ LoadBackground:
   LDA #$03
   STA counterHi
 
-  LDY #$00
+  LDY #$00; keep y zero, we jut need y to be init to 0 for indirect index mode to work in the square bracket
 LoadBackgroundLoop:
   LDA [backgroundLo], y ; load data from background
-  STA $2007             ; write to PPU port
-  LDA backgroundLo
-  CLC
-  ADC #$01
-  STA backgroundLo
-  LDA backgroundHi
-  ADC #$00
-  STA backgroundHi  ; inc poitner to the next byte
+  STA $2007             ; write to PPU data port to copy to background data
+  LDA backgroundLo      ; load the low byte of the background address into A
+  CLC                   ; clear the carry bit
+  ADC #$01              ; add 1 to A
+  STA backgroundLo      ; store A back into the mem addr
+  LDA backgroundHi      ; load the high byte of the background address into A
+  ADC #$00              ; add 0, but if there is a carry (overflow) add 1
+  STA backgroundHi      ; inc poitner to the next byte if necessary
 
-  LDA counterLo
-  SEC
-  SBC #$01
-  STA counterLo
-  LDA counterHi
-  SBC #$00
+  LDA counterLo         ; load the counter low byte
+  SEC                   ; set cary flag
+  SBC #$01              ; subtract with carry by 1
+  STA counterLo         ; store the low byte of the counter
+  LDA counterHi         ; load the high byte
+  SBC #$00              ; sub 0, but there is a carry
   STA counterHi       ; decrement the loop counter
 
-  LDA counterLo
-  CMP #$00
+  LDA counterLo         ; load the low byte
+  CMP #$00              ; see if it is zero, if not loop
   BNE LoadBackgroundLoop
   LDA counterHi
-  CMP #$00
+  CMP #$00              ; see if the high byte is zero, if not loop
   BNE LoadBackgroundLoop  ; if the loop counter isn't 0000, keep copying
 
-  
 
   ;LDA background, x     ; load data from address (background + the value in x)
   ;STA $2007             ; write to PPU
@@ -198,10 +190,6 @@ LoadAttributeLoop:
                         ; if compare was equal to 128, keep going down
 
 
-                       
-
-
-
 ;  PPUCTRL ($2000)
 ;  76543210
 ;  | ||||||
@@ -214,20 +202,46 @@ LoadAttributeLoop:
 ;  | +------ Sprite size (0: 8x8; 1: 8x16)
 ;  |
 ;  +-------- Generate an NMI at the start of the
-;            vertical blanking interval vblank (0: off; 1: on)
-  ;LDA #%10000000   ; enable NMI, sprites from Pattern Table 0
-  ;STA $2000
-
-
-  ;LDA #%00010000   ; enable sprites
-  ;STA $2001
-              
+;            vertical blanking interval vblank (0: off; 1: on)              
   LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
   STA $2000
 
+;  PPUMASK ($2001)
+;  binary byte flags
+;  76543210
+;  ||||||||
+;  |||||||+- Grayscale (0: normal color; 1: AND all palette entries
+;  |||||||   with 0x30, effectively producing a monochrome display;
+;  |||||||   note that colour emphasis STILL works when this is on!)
+;  ||||||+-- Disable background clipping in leftmost 8 pixels of screen
+;  |||||+--- Disable sprite clipping in leftmost 8 pixels of screen
+;  ||||+---- Enable background rendering
+;  |||+----- Enable sprite rendering
+;  ||+------ Intensify reds (and darken other colors)
+;  |+------- Intensify greens (and darken other colors)
+;  +-------- Intensify blues (and darken other colors)
   LDA #%00011110   ; enable sprites, enable background, no clipping on left side
   STA $2001
 
+
+;;;;;;;;;;;;;;;;;;;;
+; Initialze some game state variables
+InitialzeState:
+  LDA #$80   ; player x offset
+  STA playerx
+
+  LDA #$00   ; player y offset
+  STA playery
+  LDA #$C8   ; player y offset
+  STA ground  
+
+  LDA #$00   ; controller state
+  STA controller1
+  STA playervx;
+  STA playervy;
+
+  LDA #$01
+  STA gravity
 
 
 Forever:
@@ -271,18 +285,23 @@ Draw:
 ;;;;;;;;;;;;;;;;;;;;;
 ; Load Sprites 
 DrawPlayer:
-  LDX #$00              ; start at 0
+  LDX #$00              ; start at 0 
+  LDY #$00              ; start at 0
 DrawPlayerLoop:
   
   LDA $0203, x          ; load current x sprite position
-  CLC
-  ADC playerx               ; add player x offset
-  STA $0203, x          ; store into RAM address ($0200 + x)
+  CLC  
+  LDA playerspriteoffset, y    ; add player x with sprite offset
+  ADC playerx 
+  INY                   ; increment sprite offset coutner
+  STA $0203, x          ; store into RAM address ($0203 + x)
 
   LDA $0200, x          ; load current y sprite position
   CLC
-  ADC playery               ; add player y offset
-  STA $0200, x          ; stor into R
+  LDA playerspriteoffset, y   ; add player y with sprite offset
+  ADC playery
+  INY
+  STA $0200, x          ; store into RAM address ($0200 + x)
   INX                   ; X = X + 4 loop to the next sprite
   INX
   INX
@@ -294,16 +313,36 @@ DrawPlayerLoop:
 
 
 Update:
-    LDA #$00 ;; clear player x offset
-    STA playerx
     JSR LatchController
     JSR PollController
     JSR ReadA
     JSR ReadB
-    
-    ;JSR UpdatePositions
-
+    JSR ReadUp
+    JSR UpdatePlayerPosition
     RTS
+
+
+UpdatePlayerPosition:
+  CLC
+  LDA gravity
+  ADC playervy
+  ;STA playervy
+  ADC playery
+  STA playery  
+  CMP ground
+  BCS PutPlayerOnGround
+PlayerOnGroundDone: 
+
+  LDA playervx
+  CLC
+  ADC playerx
+  STA playerx 
+  RTS
+PutPlayerOnGround:
+  LDA ground
+  STA playery
+  JMP PlayerOnGroundDone
+
 
 LatchController:
   LDA #$01
@@ -336,24 +375,6 @@ PollControllerLoop:
   BNE PollControllerLoop
   RTS
 
-
-HandleRightButton:
-  LDA controller1         ; load button vector into ADC
-  AND #%00000001  ; check right button
-  BNE RightButtonDone ; no input skip to end
-  LDA playerx         ; load sprite X position
-  CLC             ; make sure the carry flag is clear
-  ADC #$01        ; A = A + 1
-  STA playerx         ; save sprite X position
-RightButtonDone:
-  RTS
-
-
-UpdatePositions:
-  JSR HandleRightButton  
-  LDA playerx         ; load sprite X position
-  RTS
-
 ReadA: 
   LDA controller1  ; controller1 1 - A button
   AND #%10000000  ; only look at bit 0
@@ -361,8 +382,9 @@ ReadA:
                   ; add instructions here to do something when button IS pressed (1)
   LDA $0203       ; load sprite X position
   CLC             ; make sure the carry flag is clear
-  LDA #$01        ; A = A + 1
-  STA playerx       ; save sprite X position
+  LDA playerx 
+  ADC #$01
+  STA playerx;
 ReadADone:        ; handling this button is done
   RTS
   
@@ -373,11 +395,22 @@ ReadB:
   BEQ ReadBDone   ; branch to ReadBDone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
   LDA $0203       ; load sprite X position
-  ;SEC             ; make sure carry flag is set
-  ;SBC #$01        ; A = A - 1
-  LDA #$FF        ; -1 in 2's compliment
-  STA playerx       ; save sprite X position
+  CLC
+  LDA playerx
+  ADC #$FF 
+  STA playerx
 ReadBDone:        ; handling this button is done
+  RTS
+
+ReadUp: 
+  LDA controller1       ; controller1 1 - B button
+  AND #%00001000  ; only look at bit 0
+  BEQ ReadUpDone   ; branch to ReadBDone if button is NOT pressed (0)
+                  ; add instructions here to do something when button IS pressed (1)  
+  LDA playervy
+  ADC #$FE 
+  STA playervy
+ReadUpDone:        ; handling this button is done
   RTS
 
 ;;;;;;;;;;;;;;  
@@ -415,6 +448,17 @@ playersprite:
   .db $88, $11, $00, $88   ;sprite 4
   .db $88, $12, $00, $90   ;sprite 5
   .db $90, $21, $00, $88   ;sprite 6
+
+playerspriteoffset:
+      ;x   y
+  .db $F8, $F0; (-8, -16)
+  .db $00, $F0; (0,  -16)
+  .db $08, $F0; (8 , -16)
+  .db $F8, $F8; (-8, -8) 
+  .db $00, $F8; (0,  -8)
+  .db $08, $F8; (8,  -8)
+  .db $00, $00; (0,  0)  
+
 
 
 background:
