@@ -249,13 +249,14 @@ Forever:
  
 ;; Game main loop
 MAINLOOP: ; non-maskable interrupt (draw screen)
+  ;; Needs to be done every frame
   ;; Load graphics into PPU from the memory
   LDA #$00   ; load 1 bytes of 0 in A
   STA $2003  ; set the low byte (00) of the RAM address
   LDA #$02   ; load 1 byte of $02, 
   STA $4014  ; set the high byte (02) of the RAM address, start the transfer
 
-  ;; Draw game
+  ;; Draw game first
   JSR Draw 
   
   ;; Update game
@@ -283,7 +284,7 @@ Draw:
 
 
 ;;;;;;;;;;;;;;;;;;;;;
-; Load Sprites 
+; Draw Sprites 
 DrawPlayer:
   LDX #$00              ; start at 0 
   LDY #$00              ; start at 0
