@@ -22,6 +22,8 @@
 
 ;; DECLARE SOME VARIABLES HERE
   .rsset $0000  ;;start variables at ram location 0 in zero page memory
+
+loopCount     .rs 1 ; count the loop
 playerx       .rs 1 ; players x pos
 playervx      .rs 1 ; players x vel
 playery       .rs 1 ; players y pos
@@ -30,7 +32,12 @@ controller1   .rs 1 ; controller 1 button vector
 
 gravity       .rs 1 ; gravity
 
+
 ground        .rs 1 ; y value of the ground
+inAir         .rs 1 
+
+enemyx        .rs 1
+enemyy        .rs 1
 
 backgroundLo  .rs 1
 backgroundHi  .rs 1
@@ -117,6 +124,13 @@ LoadSpritesLoop:
   CPX #$1C              ; Compare X to hex $20, decimal 32
   BNE LoadSpritesLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
                         ; if compare was equal to 32, keep going down
+                        
+LoadEnemeyLoop:
+  LDA enemyspriteframe1, x
+  STA $0200, x
+  INX
+  CPX #
+
 
 
 ;; Background is 960 bytes 240 * 4
@@ -185,7 +199,7 @@ LoadAttributeLoop:
   LDA attribute, x      ; load data from address (attribute + the value in x)
   STA $2007             ; write to PPU
   INX                   ; X = X + 1
-  CPX #$08              ; Compare X to hex $08, decimal 8 - copying 8 bytes
+  CPX #$40              ; Compare X to hex $40, decimal 64
   BNE LoadAttributeLoop  ; Branch to LoadAttributeLoop if compare was Not Equal to zero
                         ; if compare was equal to 128, keep going down
 
@@ -239,9 +253,12 @@ InitialzeState:
   STA controller1
   STA playervx;
   STA playervy;
+  STA loopCount
 
-  LDA #$01
+  LDA #$03
   STA gravity
+
+
 
 
 Forever:
@@ -270,6 +287,7 @@ MAINLOOP: ; non-maskable interrupt (draw screen)
 Draw:
   
   JSR DrawPlayer
+  JSR DrawEnemey
 
   ;;This is the PPU clean up section, so rendering the next frame starts properly.
   LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
@@ -312,28 +330,70 @@ DrawPlayerLoop:
                         ; if compare was equal to 32, keep going down
   RTS
 
+DrawEnemey:
+  LDX #$00              ; start at 0 
+  LDY #$00              ; start at 0
+DrawEnemyLoop:
+  
+  LDA $0203, x          ; load current x sprite position
+  CLC  
+  LDA enemyspriteoffset, y    ; add player x with sprite offset
+  ADC enemyx
+  INY                   ; increment sprite offset coutner
+  STA $0203, x          ; store into RAM address ($0203 + x)
+
+  LDA $0200, x          ; load current y sprite position
+  CLC
+  LDA playerspriteoffset, y   ; add player y with sprite offset
+  ADC enemyy
+  INY
+  STA $0200, x          ; store into RAM address ($0200 + x)
+  INX                   ; X = X + 4 loop to the next sprite
+  INX
+  INX
+  INX 
+  CPX #$08              ; Compare X to hex $1C, decimal 28 meaning all 7 Player sprites done
+  BNE DrawEnemyLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
+                        ; if compare was equal to 32, keep going down
+  RTS
 
 Update:
     JSR LatchController
     JSR PollController
-    JSR ReadA
-    JSR ReadB
+    JSR ReadLeft
+    JSR ReadRight
     JSR ReadUp
+    INC loopCount
     JSR UpdatePlayerPosition
+    JSR UpdateEnemyPosition
     RTS
 
 
+UpdateEnemyPosition:
+  LDA #01
+  CLC
+  ADC enemyx
+  STA enemyx
+  RTS
+
 UpdatePlayerPosition:
   CLC
+  LDA loopCount
+  CMP #$0A
+  BNE SkipGravity
   LDA gravity
   ADC playervy
-  ;STA playervy
+  STA playervy
+  LDA #$00
+  STA loopCount
+SkipGravity:
+  LDA playervy
+  CLC
   ADC playery
   STA playery  
   CMP ground
   BCS PutPlayerOnGround
 PlayerOnGroundDone: 
-
   LDA playervx
   CLC
   ADC playerx
@@ -342,6 +402,9 @@ PlayerOnGroundDone:
 PutPlayerOnGround:
   LDA ground
   STA playery
+  LDA #$00
+  STA playervy
+  STA inAir
   JMP PlayerOnGroundDone
 
 
@@ -370,37 +433,37 @@ PollController:
 PollControllerLoop:
   LDA $4016  ; player 1 - A 
   LSR A      ; shift right
-  ROL controller1    ; right shift button vector in mem location $0003
+  ROL controller1    ; rotate left button vector in mem location $0003
   INX
   CPX #$08
   BNE PollControllerLoop
   RTS
 
-ReadA: 
+ReadRight: 
   LDA controller1  ; controller1 1 - A button
-  AND #%10000000  ; only look at bit 0
-  BEQ ReadADone   ; branch to ReadADone if button is NOT pressed (0)
+  AND #%00000001  ; only look at bit 0
+  BEQ ReadRightDone   ; branch to ReadADone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
   LDA $0203       ; load sprite X position
   CLC             ; make sure the carry flag is clear
   LDA playerx 
-  ADC #$01
+  ADC #$02
   STA playerx;
-ReadADone:        ; handling this button is done
+ReadRightDone:        ; handling this button is done
   RTS
   
 
-ReadB: 
+ReadLeft: 
   LDA controller1       ; controller1 1 - B button
-  AND #%01000000  ; only look at bit 0
-  BEQ ReadBDone   ; branch to ReadBDone if button is NOT pressed (0)
+  AND #%00000010  ; only look at bit 0
+  BEQ ReadLeftDone   ; branch to ReadBDone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
   LDA $0203       ; load sprite X position
   CLC
   LDA playerx
-  ADC #$FF 
+  ADC #$FE 
   STA playerx
-ReadBDone:        ; handling this button is done
+ReadLeftDone:        ; handling this button is done
   RTS
 
 ReadUp: 
@@ -408,9 +471,18 @@ ReadUp:
   AND #%00001000  ; only look at bit 0
   BEQ ReadUpDone   ; branch to ReadBDone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)  
-  LDA playervy
-  ADC #$FE 
+  LDA inAir
+  CMP #$01
+  BEQ ReadUpDone
+
+  LDA ground
+  STA playery
+  LDA #$FA
   STA playervy
+
+  LDA #$01
+  STA inAir
+
 ReadUpDone:        ; handling this button is done
   RTS
 
@@ -424,7 +496,7 @@ ReadUpDone:        ; handling this button is done
   .org $E000
 palette:
   ;; Background Palletes (0-3)
-  .db $21,$1A,$38,$18, $0F,$02,$38,$3C, $0F,$1C,$15,$14, $3F,$02,$38,$3C
+  .db $08,$1A,$38,$18, $08,$02,$38,$3C, $08,$1C,$15,$14, $08,$02,$38,$2A
   ;;  Character Palletes (0-3)
   .db $21,$2C,$11,$15, $0F,$35,$36,$37, $0F,$39,$3A,$3B, $0F,$3D,$3E,$0F
 
@@ -461,13 +533,44 @@ playerspriteoffset:
   .db $00, $00; (0,  0)  
 
 
+enemyspriteframe1:
+  .db $F0, $04, $00, $00
+  .db $F0, $05, $00, $08
+
+enemyspriteframe2:
+  .db $F0, $14, $00, $00
+  .db $F0, $15, $00, $08
+
+enemyspriteoffset:
+  .db $00, $00
+  .db $00, $08
 
 background:
-  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
-  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  ; nametable 960 bytes long for the background
+  ;.db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+  ;.db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+
+  ;.db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+  ;.db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+
+  ;.db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+  ;.db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+
+  ;.db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
+  ;.db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10
 
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
+  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
+  
 
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
@@ -524,19 +627,9 @@ background:
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
 
-  
+    
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
-
-  
-  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
-  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
-
-  
-  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
-  .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
-
-
   
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;row 1
   .db $11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11  ;;all sky
@@ -574,21 +667,18 @@ background:
   .db $10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10,$10  ;; dirt
 
 attribute:
+   ; 64 bytes following a nametable
+  ;.db $C7,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00
+  .db $00,$00,$00,$00, $00,$00,$00,$00
 
-  .db $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
-  .db $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
-  .db $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
-  .db $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
 
-  .db %00111111, %00111111, %00111111, %00111111, %00111111, %00111111, %00111111, %00111111
-  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-  .db %00000000, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-
-  .db $FF,$24,$24,$24, $47,$47,$24,$24 ,$47,$47,$47,$47, $47,$47,$24,$24 ,$24,$24,$24,$24 ,$24,$24,$24,$24, $24,$24,$24,$24, $55,$56,$24,$24  ;;brick bottoms
 
 
 ; Load in level columns
