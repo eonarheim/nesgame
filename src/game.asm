@@ -124,13 +124,6 @@ LoadSpritesLoop:
   CPX #$1C              ; Compare X to hex $20, decimal 32
   BNE LoadSpritesLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
                         ; if compare was equal to 32, keep going down
-                        
-LoadEnemeyLoop:
-  LDA enemyspriteframe1, x
-  STA $0200, x
-  INX
-  CPX #
-
 
 
 ;; Background is 960 bytes 240 * 4
@@ -287,7 +280,6 @@ MAINLOOP: ; non-maskable interrupt (draw screen)
 Draw:
   
   JSR DrawPlayer
-  JSR DrawEnemey
 
   ;;This is the PPU clean up section, so rendering the next frame starts properly.
   LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
@@ -362,19 +354,11 @@ Update:
     JSR PollController
     JSR ReadLeft
     JSR ReadRight
-    JSR ReadUp
+    JSR ReadA
     INC loopCount
     JSR UpdatePlayerPosition
-    JSR UpdateEnemyPosition
     RTS
 
-
-UpdateEnemyPosition:
-  LDA #01
-  CLC
-  ADC enemyx
-  STA enemyx
-  RTS
 
 UpdatePlayerPosition:
   CLC
@@ -466,14 +450,14 @@ ReadLeft:
 ReadLeftDone:        ; handling this button is done
   RTS
 
-ReadUp: 
+ReadA: 
   LDA controller1       ; controller1 1 - B button
-  AND #%00001000  ; only look at bit 0
-  BEQ ReadUpDone   ; branch to ReadBDone if button is NOT pressed (0)
+  AND #%10000000  ; only look at bit 0
+  BEQ ReadADone   ; branch to ReadBDone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)  
   LDA inAir
   CMP #$01
-  BEQ ReadUpDone
+  BEQ ReadADone
 
   LDA ground
   STA playery
@@ -483,7 +467,7 @@ ReadUp:
   LDA #$01
   STA inAir
 
-ReadUpDone:        ; handling this button is done
+ReadADone:        ; handling this button is done
   RTS
 
 ;;;;;;;;;;;;;;  
